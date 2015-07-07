@@ -12,7 +12,7 @@ import "strcopy"
 type Token int
 
 const {
-  INVALID Token = iota
+  TOKEN_ERR Token = iota
   EOF
   COMMENT
   
