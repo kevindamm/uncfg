@@ -1,0 +1,105 @@
+/* Package gocc bootstrapping grammar, includes lexing and parsing.
+
+This grammar is self-describing and serves as the set of primitives for defining
+a lexer and parser of an arbitrary grammar.  Go code is generated for these
+grammars based on the initial definition of their semantics.  These operational
+semantics are described in comments around each line in order to assist in the
+development of alternative languages.
+
+The parser that is generated from this grammar will produce an AST forest with
+each node containing its name, position, children and tokens.  If parsing
+completed the top-level rule (i.e., it is in a final acceptable state) then
+the parser will indicate that as part of the return value.  The AST returned
+will contain each production rule that matched at least one token, this way
+some productions may fall through (useful for recursive descent).
+
+See the parser package for details on programmatic access.
+*/
+
+// The scanner will produce an empty string when it reaches the end of the
+// underlying byte source, so while this token is never built from actual input
+// it nevertheless has significance as a token.
+
+token END ""
+
+// The other significant terminal character is the newline.
+
+token NL  `\r[\n]|\n`
+
+// You can see that the token definitions so far have used both ""-quoted and
+// ``-quoted strings.  These are distinct in the way they produce matchers.
+// The ""-quoted strings are explicit matches.  There is no escape character and
+// it will only match if the following bytes are exactly what is indicated.  The
+// ``-quoted strings are \-unescaped and used as a pattern for matching as a
+// regular expression (with implicit ^).  Matching " must be done using `"`.
+//
+// In the case of two tokens possibly matching, the longer one takes precedence.
+// If both are the same length then the one which appears first in the grammar
+// is matched.
+
+// Not all characters become part of a token.  When these characters are found
+// they end the available bytes for the previous token and are otherwise
+// ignored.
+
+skip `[ \t\b\f]`
+
+// Comments are also skipped.  An alternative grammar could specify this as a
+// production rule in order to use it for documentation on the following code.
+
+skip (`//.*` NL)
+
+// The above demonstrates the use of sequencing to build compound matches.  It
+// also shows the use of another token within a token definition.
+
+// The contents of a grammar are a sequence of zero or more tokens, productions,
+// or indications of character sequences to skip.
+
+grammar ::= ( token | skip | production )* END
+
+// Production rules are defined using ::= as a separator between the rule name
+// and its definition.  It can be referenced from other production rules before
+// being defined.  Tokens referenced in a production rule may be from its name
+// or directly included as a ""-quoted or ``-quoted string match.
+//
+// The parser will capture the matched value of any tokens in the production
+// rule definition and make them available as indexed bytes, 0 being the entire
+// match and 1, 2, ... referring to the order the token was captured.  They are
+// available from an AST node via its Match(i) function.
+
+token ::= "token" id pattern NL
+skip ::= "skip" pattern NL
+production ::= id "::=" pattern NL
+
+// A pattern is a token id or string match, with optional kleene star (0+) or
+// plus (1+) and may be followed by another pattern.  The pattern may be wrapped
+// in parentheses (...) for specifying subgroups, and groups may also have a *
+// or + for repetition.  If a pattern is wrapped in [...] then it is optional.
+// A pattern preceded by ~ will invert the match criteria.
+//
+// Patterns are expected to fit on one line, but if there is an open grouping
+// operation (i.e., an unclosed parenthesis or bracket) then parsing will
+// continue through the line that closes the last parentheses.
+
+pattern ::= ( ( id | string-match ) [ "*" | "+" ] ( "|" pattern )*
+            | "(" pattern ( [NL] pattern )* ")" [ "*" | "+" ]
+            | "[" pattern ( [NL] pattern )* "]"
+            | "~" pattern
+            ) [ pattern ]
+
+// An identifier is any alphanumeric string with leading alpha character and
+// possibly separated by hyphen(s) or underscore(s).  Any hyphen must not be
+// followed by a numeric character.  The ID token is defined after all keyword
+// tokens in order not to misinterpret a keyword as an identifier.
+
+token ID `[a-zA-Z]` ( `[a-zA-Z0-9_]`* [ "-" `[a-zA-Z]` ] )*
+id ::= ID  // Captures the indentifier in its own AST node.
+
+// String matches are as described above.
+
+token STRING_LITERAL `"[^"]*"`
+token STRING_REGEX ( "`" 
+                     ( ~("`" | "\" | `\n` | `\r` )
+                     | "\" ( `[bfnrt]` | "\" | "`" )
+                     )*
+                     "`" )
+string-match ::= STRING_LITERAL | STRING_REGEX
